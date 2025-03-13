@@ -9,6 +9,7 @@ from sqlalchemy.future import select
 from sqlalchemy import func
 from fastapi import HTTPException
 from schemas import PassengerRequest
+import random
 
 
 router = APIRouter()
@@ -54,12 +55,35 @@ async def cancel_ticket(ticket_id: int, db: AsyncSession = Depends(get_db)):
         
         if ticket.status == "canceled":
             raise HTTPException(status_code=400, detail="Ticket is already canceled")
-        
+
+        # Cancel the ticket
         ticket.status = "canceled"
         ticket.berth_type = None
         
+        # Promote RAC to confirmed (if available)
+        rac_ticket = await db.execute(
+            select(Ticket).where(Ticket.status == "RAC").order_by(Ticket.id)
+        )
+        rac_ticket = rac_ticket.scalars().first()
+        
+        if rac_ticket:
+            rac_ticket.status = "confirmed"
+            rac_ticket.berth_type = random.choice(["middle", "upper"])
+            await db.flush()
+
+            # Promote Waiting list to RAC (if available)
+            waiting_ticket = await db.execute(
+                select(Ticket).where(Ticket.status == "waiting").order_by(Ticket.id)
+            )
+            waiting_ticket = waiting_ticket.scalars().first()
+            
+            if waiting_ticket:
+                waiting_ticket.status = "RAC"
+                waiting_ticket.berth_type = "side-lower"
+        
         await db.commit()
         return {"message": "Ticket canceled successfully"}
+
 
 
 
